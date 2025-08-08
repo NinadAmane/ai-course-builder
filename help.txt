@@ -1,0 +1,80 @@
+/ai-course-builder
+|
+|--- /client/          // React Frontend
+|    |--- /public/
+|    |--- /src/
+|    |    |--- /api/           // Functions to call our backend API (e.g., using axios)
+|    |    |--- /components/    // Reusable UI components (buttons, cards, loaders)
+|    |    |--- /hooks/         // Custom React hooks (e.g., useAuth, useCourse)
+|    |    |--- /pages/         // Main page components (HomePage, CoursePage, DashboardPage)
+|    |    |--- /lib/           // Utility functions, shadcn/ui components
+|    |    |--- App.jsx
+|    |    |--- index.jsx
+|    |--- package.json
+|    |--- tailwind.config.js
+|    |--- vite.config.js
+|
+|--- /server/          // Node.js + Express Backend
+|    |--- /config/        // Database connection, environment variables
+|    |--- /controllers/   // Logic for handling requests (e.g., courseController.js)
+|    |--- /models/        // MongoDB data schemas (e.g., User.js, Course.js)
+|    |--- /routes/        // API endpoint definitions (e.g., courseRoutes.js)
+|    |--- /services/      // Logic for interacting with external APIs (Gemini, YouTube)
+|    |--- /utils/         // Helper functions (error handling, etc.)
+|    |--- .env            // Environment variables (API keys, DB_URI)
+|    |--- index.js        // Main server entry point
+|    |--- package.json
+|
+|--- .gitignore
+|--- README.md
+
+
+
+
+MONGOOSE PASSWORD: hN1emGiyZtX8ihAc
+
+https://cloud.mongodb.com/v2/6890c7c9a095653c3b885ae2#/overview?automateSecurity=true
+
+
+
+
+
+
+
+index.css:
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Modern font and base styles */
+body {
+  font-family: 'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif;
+  background: linear-gradient(120deg, #232526 0%, #414345 100%);
+  min-height: 100vh;
+  color: #e6e6e6;
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Animated subtle gradient overlay */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(120deg, #232526 0%, #414345 100%);
+  opacity: 0.98;
+  animation: gradientFlow 16s ease-in-out infinite;
+}
+
+@keyframes gradientFlow {
+  0%, 100% { filter: hue-rotate(0deg); }
+  50% { filter: hue-rotate(25deg); }
+}
+
+/* Remove outline for mouse users, keep for keyboard */
+*:focus:not(:focus-visible) {
+  outline: none;
+}
