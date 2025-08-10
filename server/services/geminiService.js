@@ -2,7 +2,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 // Initialize the Gemini model
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-8b" });
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 // Best-effort extractor for JSON from LLM text
 function extractJsonBlock(text) {
@@ -118,9 +118,10 @@ Source transcript/context (may be partial):\n\n${text || ''}`;
     return response.text();
   } catch (error) {
     const status = error?.status || error?.code;
+    const serverError = (typeof status === 'number' && status >= 500 && status < 600) || error?.statusText === 'Internal Server Error';
     if (status === 429 || error?.statusText === 'Too Many Requests' ||
-        status === 503 || error?.statusText === 'Service Unavailable') {
-      console.warn('Gemini 429/503 in summarizeText: using heuristic summary.');
+        status === 503 || error?.statusText === 'Service Unavailable' || serverError) {
+      console.warn('Gemini 4xx/5xx in summarizeText: using heuristic summary.');
       const snippet = typeof text === 'string' ? text.slice(0, 600) : '';
       return [
         '**Why this matters:** Build a strong foundation with practical, modern examples.',

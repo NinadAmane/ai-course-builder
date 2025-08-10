@@ -74,3 +74,63 @@ exports.searchVideos = async (query) => {
     return [];
   }
 };
+
+// Parse ISO8601 duration (PT#M#S etc) to seconds
+function parseISODurationToSeconds(iso) {
+  if (!iso) return 0;
+  const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!m) return 0;
+  const h = parseInt(m[1] || '0', 10);
+  const min = parseInt(m[2] || '0', 10);
+  const s = parseInt(m[3] || '0', 10);
+  return h * 3600 + min * 60 + s;
+}
+
+async function getVideoDetails(videoIds = []) {
+  if (!videoIds.length) return {};
+  try {
+    const resp = await youtube.videos.list({
+      part: 'contentDetails,statistics,snippet',
+      id: videoIds.join(','),
+      maxResults: videoIds.length,
+    });
+    const map = {};
+    for (const it of resp.data.items || []) {
+      map[it.id] = {
+        durationSec: parseISODurationToSeconds(it.contentDetails?.duration),
+        publishedAt: it.snippet?.publishedAt ? new Date(it.snippet.publishedAt) : null,
+        channelId: it.snippet?.channelId,
+        channelTitle: it.snippet?.channelTitle,
+        viewCount: Number(it.statistics?.viewCount || 0),
+        likeCount: Number(it.statistics?.likeCount || 0),
+        description: it.snippet?.description || '',
+      };
+    }
+    return map;
+  } catch (e) {
+    console.warn('getVideoDetails failed:', e.message);
+    return {};
+  }
+}
+
+// New: search with enriched metadata for filtering and semantic steps
+exports.searchVideosWithDetails = async (query, maxResults = 10) => {
+  const base = await youtube.search.list({
+    part: 'snippet', q: query, type: 'video', maxResults,
+    videoEmbeddable: true, order: 'relevance', relevanceLanguage: 'en', safeSearch: 'moderate', regionCode: 'US'
+  });
+  const items = base.data.items || [];
+  const sorted = items
+    .map((item) => ({ item, score: scoreItem(item, query) }))
+    .sort((a, b) => b.score - a.score)
+    .map(({ item }) => item);
+  const pick = (sorted.length ? sorted : items).slice(0, maxResults);
+  const ids = pick.map((it) => it.id.videoId);
+  const details = await getVideoDetails(ids);
+  return pick.map((it) => ({
+    videoId: it.id.videoId,
+    title: it.snippet.title,
+    thumbnailUrl: it.snippet.thumbnails?.medium?.url || it.snippet.thumbnails?.default?.url,
+    ...details[it.id.videoId],
+  }));
+};

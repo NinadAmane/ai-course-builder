@@ -1,13 +1,24 @@
 const { YoutubeTranscript } = require("youtube-transcript");
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 // Fetch transcript for a single video
 async function getTranscript(videoId) {
-  try {
-    const transcript = await YoutubeTranscript.fetchTranscript(videoId);
-    return transcript.map((item) => item.text).join(" ");
-  } catch (error) {
-    console.log(`Could not get transcript for video ${videoId}`);
-    return "";
+  const MAX_TRIES = 3;
+  for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
+    try {
+      const transcript = await YoutubeTranscript.fetchTranscript(videoId);
+      return transcript.map((item) => item.text).join(" ");
+    } catch (error) {
+      if (attempt >= MAX_TRIES) {
+        console.log(`Could not get transcript for video ${videoId}`);
+        return "";
+      }
+      const backoff = 500 * Math.pow(2, attempt - 1); // 500ms, 1s
+      await sleep(backoff);
+    }
   }
 }
 
