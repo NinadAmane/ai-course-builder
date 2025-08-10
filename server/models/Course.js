@@ -10,6 +10,15 @@ const moduleSchema = new mongoose.Schema({
       thumbnailUrl: String,
     },
   ],
+  // New: web resources (articles, docs, PDFs) attached to this module
+  resources: [
+    {
+      title: String,
+      url: String,
+      source: String,
+      snippet: String,
+    },
+  ],
   summary: { type: String },
   quiz: [
     {
