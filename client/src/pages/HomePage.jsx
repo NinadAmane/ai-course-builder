@@ -264,8 +264,8 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="hidden md:flex items-center gap-3">
-              <span className="text-xs text-slate-400">Powered by smart search</span>
+            <div className="hidden md:flex items-center gap-2">
+              <span className="text-xs text-slate-400">Powered by Google Gemini</span>
               <Sparkles className="text-pink-400" />
             </div>
           </div>
@@ -522,10 +522,12 @@ export default function HomePage() {
         <footer className="text-center py-8 px-6">
           <div className="max-w-7xl mx-auto space-y-2">
             <p className="text-sm text-slate-400">
-              &copy; 2025 AI Course Builder. Crafted with intelligence and passion.
+              &copy; 2025 AI Course Builder · Built by <span className="font-semibold text-slate-200">Ninad Amane</span>
             </p>
-            <p className="text-xs text-slate-500">
-              Empowering learners through AI-generated educational content.
+            <p className="text-xs text-slate-400 flex items-center justify-center gap-4">
+              <a className="hover:text-purple-300 underline/50" href="https://www.linkedin.com/in/ninad-amane-126775290/" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+              <a className="hover:text-purple-300 underline/50" href="https://github.com/NinadAmane" target="_blank" rel="noopener noreferrer">GitHub</a>
+              <a className="hover:text-purple-300 underline/50" href="https://x.com/NinadAmane" target="_blank" rel="noopener noreferrer">Twitter/X</a>
             </p>
           </div>
         </footer>
