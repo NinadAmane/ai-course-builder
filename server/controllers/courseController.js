@@ -33,12 +33,57 @@ function refineQuery(text = '', objective = '') {
     || '';
 }
 
+// Basic body validation/sanitization
+function validateGenerateBody(body = {}) {
+  const out = { errors: [], value: {} };
+  let { topic, refresh, semantic = true, filters = {} } = body;
+
+  if (typeof topic !== 'string') topic = '';
+  topic = topic.trim();
+  if (!topic || topic.length < 2) out.errors.push('Topic is required and must be at least 2 characters.');
+
+  refresh = Boolean(refresh);
+  semantic = Boolean(semantic);
+
+  const cleanedFilters = {};
+  if (filters && typeof filters === 'object') {
+    const { minViews, minMinutes, maxMinutes, uploadedAfter, channelAllow, channelBlock } = filters;
+    if (minViews != null) {
+      const v = Number(minViews);
+      if (!Number.isFinite(v) || v < 0) out.errors.push('minViews must be a non-negative number');
+      else cleanedFilters.minViews = v;
+    }
+    if (minMinutes != null) {
+      const v = Number(minMinutes);
+      if (!Number.isFinite(v) || v < 0) out.errors.push('minMinutes must be a non-negative number');
+      else cleanedFilters.minMinutes = v;
+    }
+    if (maxMinutes != null) {
+      const v = Number(maxMinutes);
+      if (!Number.isFinite(v) || v < 0) out.errors.push('maxMinutes must be a non-negative number');
+      else cleanedFilters.maxMinutes = v;
+    }
+    if (uploadedAfter) {
+      const d = new Date(uploadedAfter);
+      if (isNaN(d)) out.errors.push('uploadedAfter must be a valid date');
+      else cleanedFilters.uploadedAfter = d.toISOString();
+    }
+    if (Array.isArray(channelAllow)) cleanedFilters.channelAllow = channelAllow.filter(Boolean);
+    if (Array.isArray(channelBlock)) cleanedFilters.channelBlock = channelBlock.filter(Boolean);
+  }
+
+  out.value = { topic, refresh, semantic, filters: cleanedFilters };
+  return out;
+}
+
 exports.generateCourse = async (req, res) => {
   try {
-    const { topic, refresh, semantic = true, filters = {} } = req.body;
-    if (!topic) {
-      return res.status(400).json({ message: "Topic is required" });
+    // Validate inputs
+    const { errors, value } = validateGenerateBody(req.body || {});
+    if (errors.length) {
+      return res.status(400).json({ message: errors.join(' ') });
     }
+    const { topic, refresh, semantic = true, filters = {} } = value;
 
     // 0. If we've already generated this course, reuse it to avoid hitting LLM quota
     let existing = await Course.findOne({ title: topic });
@@ -231,17 +276,26 @@ exports.generateCourse = async (req, res) => {
     );
 
     // 3. Create and save the new course with modules containing videos + summaries
-    const newCourse = new Course({
-      title: topic,
-      modules: modulesWithContent,
-    });
-    await newCourse.save();
+    try {
+      const newCourse = new Course({
+        title: topic,
+        modules: modulesWithContent,
+      });
+      await newCourse.save();
 
-    const totalResNew = newCourse.modules.reduce((n, m) => n + ((m.resources||[]).length), 0);
-    console.log('[newCourse]', topic, 'modules=', newCourse.modules.length, 'totalResources=', totalResNew);
+      const totalResNew = newCourse.modules.reduce((n, m) => n + ((m.resources||[]).length), 0);
+      console.log('[newCourse]', topic, 'modules=', newCourse.modules.length, 'totalResources=', totalResNew);
 
-    // 4. Send the complete course back to the frontend
-    res.status(201).json(newCourse);
+      // 4. Send the complete course back to the frontend
+      return res.status(201).json(newCourse);
+    } catch (e) {
+      // Handle race condition with unique index on title
+      if (e && e.code === 11000) {
+        const doc = await Course.findOne({ title: topic });
+        if (doc) return res.status(200).json(doc);
+      }
+      throw e;
+    }
   } catch (error) {
     console.error("Error in generateCourse:", error);
     res.status(500).json({ message: "Failed to generate course" });

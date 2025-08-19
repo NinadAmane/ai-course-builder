@@ -46,6 +46,9 @@ const courseSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+// Ensure fast lookup and prevent duplicate courses by title
+courseSchema.index({ title: 1 }, { unique: true });
+
 const Course = mongoose.model("Course", courseSchema); // ✅ CREATE MODEL
 
 module.exports = Course; // ✅ EXPORT IT

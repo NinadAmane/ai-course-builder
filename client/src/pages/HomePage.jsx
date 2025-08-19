@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { BookOpen, Sparkles, BrainCircuit, Play, ArrowRight, History } from 'lucide-react';
 import { marked } from 'marked';
@@ -46,6 +46,9 @@ function saveRecentTopic(topic) {
   }
 }
 
+// Env-based API base URL with safe fallback
+const API_BASE = import.meta.env?.VITE_API_URL || 'http://localhost:5000';
+
 export default function HomePage() {
   const [topic, setTopic] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -53,6 +56,7 @@ export default function HomePage() {
   const [error, setError] = useState('');
   const [controller, setController] = useState(null);
   const [refresh, setRefresh] = useState(false);
+  const exportRef = useRef(null);
 
   // New: semantic and filter controls
   const [semantic, setSemantic] = useState(true);
@@ -70,6 +74,48 @@ export default function HomePage() {
 
   const refreshRecent = () => setRecent(loadRecentTopics());
 
+  // Enhance rendered summaries: add a header with Copy button to each code block
+  useEffect(() => {
+    if (!course || isLoading) return;
+    const roots = document.querySelectorAll('.summary-prose');
+    roots.forEach((container) => {
+      const pres = container.querySelectorAll('pre');
+      pres.forEach((pre) => {
+        if (pre.dataset.enhanced === '1') return;
+        pre.dataset.enhanced = '1';
+        const code = pre.querySelector('code');
+        const langMatch = code?.className?.match(/language-([a-z0-9+#-]+)/i);
+        const langLabel = langMatch ? langMatch[1].replace('plusplus', '++') : 'Code Sample';
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'codebox';
+        const header = document.createElement('div');
+        header.className = 'codebox-header';
+        const title = document.createElement('span');
+        title.textContent = langLabel.charAt(0).toUpperCase() + langLabel.slice(1);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'copy-btn';
+        btn.setAttribute('aria-label', 'Copy code');
+        btn.setAttribute('title', 'Copy');
+        btn.textContent = 'Copy';
+        btn.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(code?.innerText || pre.innerText || '');
+            btn.textContent = 'Copied';
+            setTimeout(() => (btn.textContent = 'Copy'), 1500);
+          } catch {}
+        });
+        header.appendChild(title);
+        header.appendChild(btn);
+
+        pre.parentNode?.insertBefore(wrapper, pre);
+        wrapper.appendChild(header);
+        wrapper.appendChild(pre);
+      });
+    });
+  }, [course, isLoading]);
+
   // Quick action: clear form and results
   const handleClear = () => {
     setTopic('');
@@ -80,6 +126,8 @@ export default function HomePage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isLoading) return;
+    const trimmed = (topic || '').trim();
+    if (!trimmed) return;
     setIsLoading(true);
     setCourse(null);
     setError('');
@@ -88,9 +136,9 @@ export default function HomePage() {
     setController(ctrl);
     try {
       const response = await axios.post(
-        'http://localhost:5000/api/generate',
+        `${API_BASE}/api/generate`,
         {
-          topic,
+          topic: trimmed,
           refresh,
           semantic,
           filters: {
@@ -103,7 +151,7 @@ export default function HomePage() {
         { signal: ctrl.signal, timeout: 60000 }
       );
       setCourse(response.data);
-      saveRecentTopic(topic);
+      saveRecentTopic(trimmed);
       refreshRecent();
     } catch (err) {
       if (axios.isCancel?.(err) || err?.name === 'CanceledError') {
@@ -128,6 +176,68 @@ export default function HomePage() {
   const useRecent = (t) => {
     setTopic(t);
     setShowHistory(false);
+  };
+
+  // Lazy-load html2pdf.js from CDN (single-flight)
+  const ensureHtml2Pdf = () => {
+    return new Promise((resolve, reject) => {
+      if (window.html2pdf) return resolve(window.html2pdf);
+      const existing = document.querySelector('script[data-html2pdf]');
+      if (existing) {
+        existing.addEventListener('load', () => resolve(window.html2pdf));
+        existing.addEventListener('error', reject);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js';
+      script.async = true;
+      script.defer = true;
+      script.setAttribute('data-html2pdf', '1');
+      script.onload = () => resolve(window.html2pdf);
+      script.onerror = () => reject(new Error('Failed to load html2pdf'));
+      document.body.appendChild(script);
+    });
+  };
+
+  const handleExportPdf = async () => {
+    if (!course || !exportRef.current) return;
+    try {
+      const html2pdf = await ensureHtml2Pdf();
+      const root = exportRef.current;
+      const safeTitle = (course.title || 'course')
+        .replace(/[^a-z0-9\-\s_]/gi, '')
+        .replace(/\s+/g, '-')
+        .toLowerCase();
+
+      // Enter PDF mode: stop animations/transitions and hide elements marked no-print
+      document.body.classList.add('pdf-mode');
+
+      const opt = {
+        margin: [12, 16, 16, 16],
+        filename: `${safeTitle}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          ignoreElements: (el) => {
+            try {
+              const cls = el?.classList;
+              return cls?.contains('no-print') || el.tagName === 'VIDEO' || el.tagName === 'IFRAME' || el.tagName === 'IMG';
+            } catch { return false; }
+          },
+          windowWidth: document.documentElement.clientWidth,
+        },
+        jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['css', 'legacy'] },
+      };
+      await html2pdf().set(opt).from(root).save();
+    } catch (e) {
+      console.error('Export PDF failed', e);
+      setError('Export to PDF failed. Please try again.');
+    } finally {
+      document.body.classList.remove('pdf-mode');
+    }
   };
 
   return (
@@ -295,12 +405,23 @@ export default function HomePage() {
                 {isLoading && <Loader />}
 
                 {course && (
-                  <div className="space-y-8">
-                    <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                  <div className="space-y-8" ref={exportRef}>
+                    <div className="p-4 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between">
                       <div className="flex items-center gap-2 font-semibold text-purple-300">
                         <Sparkles size={18} /> Generated Course
                       </div>
                       <h2 className="mt-1 text-2xl font-bold text-slate-100">{course.title}</h2>
+                      <div className="ml-auto">
+                        <button
+                          type="button"
+                          onClick={handleExportPdf}
+                          className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/10 hover:bg-white/20 text-slate-100 text-sm"
+                          title="Export this course as PDF"
+                          aria-label="Export course as PDF"
+                        >
+                          Export PDF
+                        </button>
+                      </div>
                     </div>
 
                     <div className="space-y-6">
@@ -317,8 +438,11 @@ export default function HomePage() {
 
                           {/* Summary */}
                           {module.summary && (
-                            <div className="mt-4 p-6 rounded-xl bg-white/5 border border-white/10">
-                              <div className="summary-prose text-[16px] md:text-[18px] leading-7 md:leading-8 tracking-[0.005em] text-slate-200 w-full max-w-none">
+                            <div className="mt-4 p-6 rounded-2xl bg-gradient-to-b from-slate-800/70 to-slate-900/80 border border-white/10 shadow-inner relative overflow-hidden pdf-avoid-break">
+                              {/* subtle moving blur background */}
+                              <div className="pointer-events-none absolute -top-6 -left-8 w-56 h-56 bg-purple-500/15 rounded-full blur-3xl animate-blob"></div>
+                              <div className="pointer-events-none absolute -bottom-8 -right-10 w-64 h-64 bg-fuchsia-500/10 rounded-full blur-3xl animate-blob animation-delay-2000"></div>
+                              <div className="summary-prose text-[18px] md:text-[20px] leading-8 md:leading-9 tracking-[0.005em] w-full max-w-none">
                                 <SafeHTML html={marked.parse(module.summary)} />
                               </div>
                             </div>
@@ -328,7 +452,7 @@ export default function HomePage() {
                           {module.videos && module.videos.length > 0 && (
                             <div className="mt-6">
                               <h4 className="font-semibold mb-3">Suggested Videos</h4>
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 no-print">
                                 {module.videos.map((video, vIdx) => (
                                   <a key={vIdx} href={`https://www.youtube.com/watch?v=${video.videoId}`} target="_blank" rel="noopener noreferrer" className="group/video block rounded-xl overflow-hidden border border-white/10 bg-white/5 hover:bg-white/10 transition shadow-sm">
                                     <div className="relative aspect-video bg-white/5">

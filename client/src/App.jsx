@@ -132,6 +132,18 @@ function IntroPage() {
   );
 }
 
+function NotFound() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100">
+      <div className="text-center">
+        <h1 className="text-3xl font-bold">404</h1>
+        <p className="text-slate-400 mt-2">Page not found</p>
+        <Link to="/" className="inline-block mt-4 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20">Go Home</Link>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   return (
     <div className="dark">
@@ -146,6 +158,7 @@ function App() {
               </div>
             }
           />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
     </div>
