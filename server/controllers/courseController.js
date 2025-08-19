@@ -51,14 +51,49 @@ exports.generateCourse = async (req, res) => {
           if (resources.length) {
             resources = webSearchService.sanitizeResources(resources);
           }
-          const needsResources = !resources.length;
-          if (needsResources) {
-            const refined = refineQuery(module.title, module.learningObjective);
-            const query = `${refined} tutorial guide documentation pdf`;
+
+          // determine if resources look generic/low quality
+          const looksGeneric = (items = []) => {
+            return (items || []).some((r) => {
+              const t = (r?.title || '').toLowerCase();
+              const u = (r?.url || '').toLowerCase();
+              return /\bsearch\b/.test(t) || /[?&]q=/.test(u) || /duckduckgo\.com|google\.com|bing\.com/.test(u);
+            });
+          };
+
+          const refined = refineQuery(module.title, module.learningObjective);
+          const query = `${refined} tutorial guide documentation examples`;
+
+          // Replace if empty or generic
+          if (!resources.length || looksGeneric(resources)) {
             resources = await webSearchService.searchResources(query, 10);
-            console.log('[enrich][resources]', module.title, '=>', resources?.length || 0);
           }
-          return { ...module.toObject?.() ?? module, resources };
+
+          // Summary quality gate – regenerate if too short or boilerplatey
+          const badSummary = (s = '') => {
+            const lc = (s || '').toLowerCase();
+            const wc = lc.split(/\s+/).filter(Boolean).length;
+            const boiler = [
+              'this module provides a clear, end-to-end narrative',
+              'we then transition into the workflow you will actually use',
+              'by the end, you should be able to explain the concept to others',
+            ];
+            return wc < 350 || boiler.some(p => lc.includes(p));
+          };
+
+          let summary = module.summary || '';
+          if (badSummary(summary)) {
+            const context = [
+              `Module: ${module.title}`,
+              `Objective: ${module.learningObjective || 'N/A'}`,
+              resources && resources.length ? `Key resources:\n${resources.slice(0,5).map(r => `- ${r.title} (${(() => { try {return new URL(r.url).hostname.replace(/^www\./,'')} catch {return ''}})()}) — ${(r.snippet||'').replace(/\s+/g,' ').slice(0,120)}`).join('\n')}` : ''
+            ].filter(Boolean).join('\n\n');
+            try {
+              summary = await geminiService.summarizeText(context);
+            } catch {}
+          }
+
+          return { ...module.toObject?.() ?? module, resources, summary };
         })
       );
       existing.modules = enrichedModules;
@@ -82,8 +117,8 @@ exports.generateCourse = async (req, res) => {
           // refined, keyword-focused query yields more relevant results
           (async () => {
             const refined = refineQuery(module.title, module.learningObjective);
-            const q = `${refined} tutorial guide documentation pdf`;
-            return webSearchService.searchResources(q, 10);
+            const query = `${refined} tutorial guide documentation examples`;
+            return webSearchService.searchResources(query, 10);
           })(),
         ]);
         const resources = webSearchService.sanitizeResources(rawResources);
@@ -178,10 +213,11 @@ exports.generateCourse = async (req, res) => {
 
         let summary;
         if (transcript && transcript.trim().length > 0) {
-          summary = await geminiService.summarizeText(transcript);
+          const combined = `Module: ${module.title}\nObjective: ${module.learningObjective || 'N/A'}\n\nTranscript (may be partial):\n\n${transcript}`;
+          summary = await geminiService.summarizeText(combined);
         } else {
-          const videoTitles = (videos || []).map((v) => `- ${v.title}`).join("\n");
-          const fallbackContext = `No transcript was available. Please provide a helpful, concise learning summary based on the following context.\n\nModule Title: ${module.title}\nLearning Objective: ${module.learningObjective || "N/A"}\n${videos && videos.length ? `Suggested Videos:\n${videoTitles}` : "No videos could be found."}`;
+          const videoLines = (videos || []).map((v) => `- ${v.title}`).join("\n");
+          const fallbackContext = `No transcript was available. Please provide a helpful, concise learning summary based on the following context.\n\nModule Title: ${module.title}\nLearning Objective: ${module.learningObjective || "N/A"}\n${videos && videos.length ? `Suggested Videos:\n${videoLines}` : "No videos could be found."}`;
           summary = await geminiService.summarizeText(fallbackContext);
         }
 

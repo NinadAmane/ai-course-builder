@@ -317,8 +317,10 @@ export default function HomePage() {
 
                           {/* Summary */}
                           {module.summary && (
-                            <div className="mt-4 p-4 rounded-xl bg-white/5 border border-white/10">
-                              <SafeHTML html={marked.parse(module.summary)} />
+                            <div className="mt-4 p-6 rounded-xl bg-white/5 border border-white/10">
+                              <div className="summary-prose text-[16px] md:text-[18px] leading-7 md:leading-8 tracking-[0.005em] text-slate-200 w-full max-w-none">
+                                <SafeHTML html={marked.parse(module.summary)} />
+                              </div>
                             </div>
                           )}
 

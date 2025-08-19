@@ -93,7 +93,7 @@ function sanitizeResources(items = []) {
   return out;
 }
 
-function getJson(url, timeoutMs = 6000) {
+async function getJson(url, timeoutMs = 6000) {
   return new Promise((resolve, reject) => {
     if (typeof fetch === 'function') {
       fetch(url, { method: 'GET', headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Safari/537.36' } })
@@ -108,18 +108,19 @@ function getJson(url, timeoutMs = 6000) {
   });
 }
 
-function getText(url, timeoutMs = 6000) {
+async function getText(url, timeoutMs = 6000) {
   return new Promise((resolve, reject) => {
-    if (typeof fetch === 'function') {
-      fetch(url, { method: 'GET', headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } })
-        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); })
-        .then(resolve).catch(reject); return;
-    }
-    const req = https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
-      if (res.statusCode && res.statusCode >= 400) { reject(new Error(`HTTP ${res.statusCode}`)); res.resume(); return; }
-      let data=''; res.setEncoding('utf8'); res.on('data', c => data+=c); res.on('end', () => resolve(data));
+    const req = https.get(url, { timeout: timeoutMs, headers: { 'User-Agent': 'AI-Course-Builder/1.0' } }, (res) => {
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => resolve(data));
     });
-    req.on('error', reject); req.setTimeout(timeoutMs, () => req.destroy(new Error('Timeout')));
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy(new Error('Request timeout'));
+      reject(new Error('Request timeout'));
+    });
   });
 }
 
@@ -174,21 +175,93 @@ async function ddgQuery(rawQuery) {
   return [];
 }
 
-function curatedFallback(query) {
-  const q = query.trim();
-  const qEnc = encodeURIComponent(q);
-  const qDash = encodeURIComponent(q.replace(/\s+/g, '+'));
-  const tag = q.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)[0] || 'programming';
-  return [
-    { title: 'Wikipedia Search', url: `https://en.wikipedia.org/w/index.php?search=${qEnc}`, source: 'wikipedia.org', snippet: '' },
-    { title: 'GeeksforGeeks Search', url: `https://www.geeksforgeeks.org/?s=${qEnc}`, source: 'geeksforgeeks.org', snippet: '' },
-    { title: 'freeCodeCamp Guide Search', url: `https://www.freecodecamp.org/news/search/?query=${qEnc}`, source: 'freecodecamp.org', snippet: '' },
-    { title: 'Tutorialspoint Search', url: `https://www.tutorialspoint.com/search/${qDash}`, source: 'tutorialspoint.com', snippet: '' },
-    { title: 'Stack Overflow Search', url: `https://stackoverflow.com/search?q=${qEnc}`, source: 'stackoverflow.com', snippet: '' },
-    { title: 'Kaggle Search', url: `https://www.kaggle.com/search?q=${qEnc}`, source: 'kaggle.com', snippet: '' },
-    { title: 'scikit-learn Docs Search', url: `https://www.google.com/search?q=site%3Ascikit-learn.org+${qEnc}`, source: 'scikit-learn.org', snippet: '' },
-    { title: 'MDN Search', url: `https://developer.mozilla.org/en-US/search?q=${qEnc}`, source: 'developer.mozilla.org', snippet: '' },
-  ];
+async function searchWikipedia(q, limit = 5) {
+  try {
+    const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(q)}&utf8=&format=json&origin=*`;
+    const json = await getJson(url);
+    const items = (json?.query?.search || []).slice(0, limit).map((it) => ({
+      title: it.title,
+      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(it.title.replace(/\s+/g, '_'))}`,
+      source: 'wikipedia.org',
+      snippet: decodeHtmlEntities((it.snippet || '').replace(/<[^>]+>/g, ''))
+    }));
+    return items;
+  } catch { return []; }
+}
+
+async function searchArxiv(q, limit = 5) {
+  try {
+    const url = `http://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(q)}&start=0&max_results=${limit}`;
+    const xml = await getText(url, 7000);
+    const entries = [];
+    const entryRe = /<entry>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?<id>([\s\S]*?)<\/id>[\s\S]*?<summary>([\s\S]*?)<\/summary>[\s\S]*?<\/entry>/gi;
+    let m;
+    while ((m = entryRe.exec(xml)) && entries.length < limit) {
+      const title = decodeHtmlEntities(m[1].trim().replace(/\s+/g, ' '));
+      const url2 = m[2].trim();
+      const summary = decodeHtmlEntities(m[3].trim().replace(/\s+/g, ' '));
+      entries.push({ title, url: url2, source: 'arxiv.org', snippet: summary.slice(0, 240) });
+    }
+    return entries;
+  } catch { return []; }
+}
+
+async function searchStackOverflow(q, limit = 5) {
+  try {
+    const url = `https://api.stackexchange.com/2.3/search/advanced?order=desc&sort=relevance&q=${encodeURIComponent(q)}&site=stackoverflow&pagesize=${limit}`;
+    const json = await getJson(url);
+    return (json?.items || []).slice(0, limit).map((it) => ({
+      title: it.title,
+      url: it.link,
+      source: 'stackoverflow.com',
+      snippet: `Score ${it.score ?? 0} • ${it.is_answered ? 'Answered' : 'Unanswered'} • ${it.answer_count ?? 0} answers`
+    }));
+  } catch { return []; }
+}
+
+async function searchMediumByTag(q, limit = 5) {
+  try {
+    const tag = (q.toLowerCase().match(/[a-z0-9]+/g) || []).slice(0, 2).join('-') || 'programming';
+    const url = `https://medium.com/feed/tag/${encodeURIComponent(tag)}`;
+    const xml = await getText(url, 7000);
+    const out = [];
+    const itemRe = /<item>[\s\S]*?<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>[\s\S]*?<link>([\s\S]*?)<\/link>[\s\S]*?(?:<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>)?[\s\S]*?<\/item>/gi;
+    let m;
+    while ((m = itemRe.exec(xml)) && out.length < limit) {
+      const title = decodeHtmlEntities(m[1].trim());
+      const url2 = m[2].trim();
+      const desc = decodeHtmlEntities((m[3] || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' '));
+      out.push({ title, url: url2, source: 'medium.com', snippet: desc.slice(0, 200) });
+    }
+    return out;
+  } catch { return []; }
+}
+
+async function searchCourseraEdx(q, limit = 6) {
+  const items = [];
+  try {
+    const cHtml = await getText(`https://www.coursera.org/search?query=${encodeURIComponent(q)}`, 7000);
+    const cRe = /<a[^>]+data-e2e="search-result-title"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    let m; let count = 0;
+    while ((m = cRe.exec(cHtml)) && count < Math.ceil(limit/2)) {
+      const url = `https://www.coursera.org${m[1]}`;
+      const title = decodeHtmlEntities(m[2].replace(/<[^>]+>/g, '').trim());
+      items.push({ title, url, source: 'coursera.org', snippet: '' });
+      count++;
+    }
+  } catch {}
+  try {
+    const eHtml = await getText(`https://www.edx.org/search?q=${encodeURIComponent(q)}`, 7000);
+    const eRe = /<a[^>]+class="discovery-card-link"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    let m; let count = 0;
+    while ((m = eRe.exec(eHtml)) && items.length < limit) {
+      const url = m[1].startsWith('http') ? m[1] : `https://www.edx.org${m[1]}`;
+      const title = decodeHtmlEntities(m[2].replace(/<[^>]+>/g, '').trim());
+      items.push({ title, url, source: 'edx.org', snippet: '' });
+      count++;
+    }
+  } catch {}
+  return items.slice(0, limit);
 }
 
 async function searchResources(query, limit = 8) {
@@ -233,6 +306,21 @@ async function searchResources(query, limit = 8) {
     }
   }
 
+  // Fire source-specific fetchers in parallel
+  const apiFetches = [
+    searchWikipedia(query, 6),
+    searchArxiv(query, 6),
+    searchStackOverflow(query, 6),
+    searchMediumByTag(query, 6),
+    searchCourseraEdx(query, 6),
+  ];
+
+  const apiPromise = Promise.allSettled(apiFetches).then((results) => {
+    for (const r of results) {
+      if (r.status === 'fulfilled' && Array.isArray(r.value) && r.value.length) addResults(r.value);
+    }
+  });
+
   async function worker() {
     while (idx < baseQueries.length && collected.length < Math.max(limit, 8)) {
       if (Date.now() - startedAt > overallBudgetMs) break;
@@ -248,6 +336,7 @@ async function searchResources(query, limit = 8) {
     Promise.allSettled(workers),
     new Promise((resolve) => setTimeout(resolve, overallBudgetMs + 500)),
   ]);
+  await apiPromise.catch(() => {});
 
   if (collected.length === 0) {
     const fb = curatedFallback(query);
@@ -267,6 +356,150 @@ async function searchResources(query, limit = 8) {
     }
   }
   return scored.slice(0, limit);
+}
+
+function tokensFromQuery(q = '') {
+  return (q || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter(t => t.length > 2);
+}
+function matchesQuery(text = '', tokens = [], min = 1) {
+  if (!tokens.length) return true;
+  const lc = (text || '').toLowerCase();
+  let hits = 0;
+  for (const t of tokens) if (lc.includes(t)) hits++;
+  return hits >= min;
+}
+function isGenericSearchResult(item) {
+  const t = (item?.title || '').toLowerCase();
+  const u = (item?.url || '').toLowerCase();
+  const isSearchWord = /\bsearch\b|site[: ]|docs search|documentation search/.test(t);
+  const isSearchUrl = /[?&]q=/.test(u) || /\/search(\b|\/?)/.test(u);
+  const isEngine = /duckduckgo\.com|google\.com|bing\.com|yahoo\.com|baidu\.com/.test(u);
+  const isDomainRoot = (() => {
+    try {
+      const url = new URL(item.url);
+      return (url.pathname === '/' || url.pathname === '') && !url.hash && !url.search;
+    } catch { return false; }
+  })();
+  return isEngine || isSearchUrl || (isSearchWord && isDomainRoot);
+}
+
+async function searchResources(query, limit = 8) {
+  // Wider, but curated set of trusted domains for relevance
+  const domains = [
+    'geeksforgeeks.org','wikipedia.org','tutorialspoint.com','freecodecamp.org','stackoverflow.com','oracle.com','docs.oracle.com','baeldung.com',
+    'w3schools.com','learn.microsoft.com','developer.mozilla.org','huggingface.co','pytorch.org','tensorflow.org','scikit-learn.org',
+    'kaggle.com','pandas.pydata.org','numpy.org','plotly.com','arxiv.org','mit.edu','stanford.edu','harvard.edu','coursera.org',
+  ];
+
+  // Query variants improve recall and relevance on DDG
+  const variants = [
+    query,
+    `${query} overview`,
+    `${query} basics`,
+    `${query} tutorial`,
+    `${query} guide`,
+    `${query} best practices`,
+    `${query} examples`,
+    `${query} cheatsheet`,
+    `${query} pdf`,
+    `${query} 2024`,
+    `${query} 2025`,
+    `${query} site:edu`,
+    `${query} site:org`,
+  ];
+
+  const baseQueries = [...variants];
+  for (const d of domains) baseQueries.push(`${query} site:${d}`);
+
+  const collected = [];
+  const seen = new Set();
+  const maxConcurrency = 4;
+  let idx = 0;
+  const startedAt = Date.now();
+  const overallBudgetMs = 12000; // allow a bit more time for better coverage
+
+  function addResults(items) {
+    const cleaned = sanitizeResources(items);
+    for (const it of cleaned) {
+      if (!seen.has(it.url)) { collected.push(it); seen.add(it.url); }
+    }
+  }
+
+  // Fire source-specific fetchers in parallel
+  const apiFetches = [
+    searchWikipedia(query, 6),
+    searchArxiv(query, 6),
+    searchStackOverflow(query, 6),
+    searchMediumByTag(query, 6),
+    searchCourseraEdx(query, 6),
+  ];
+
+  const apiPromise = Promise.allSettled(apiFetches).then((results) => {
+    for (const r of results) {
+      if (r.status === 'fulfilled' && Array.isArray(r.value) && r.value.length) addResults(r.value);
+    }
+  });
+
+  async function worker() {
+    while (idx < baseQueries.length && collected.length < Math.max(limit, 8)) {
+      if (Date.now() - startedAt > overallBudgetMs) break;
+      const i = idx++;
+      let got = [];
+      try { got = await ddgQuery(baseQueries[i]); } catch {}
+      if (got.length) addResults(got);
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(maxConcurrency, baseQueries.length) }, () => worker());
+  await Promise.race([
+    Promise.allSettled(workers),
+    new Promise((resolve) => setTimeout(resolve, overallBudgetMs + 500)),
+  ]);
+  await apiPromise.catch(() => {});
+
+  if (collected.length === 0) {
+    const fb = curatedFallback(query);
+    console.log('[webSearch][FALLBACK]', query, '->', fb.length);
+    return fb.slice(0, limit);
+  }
+
+  const tokens = tokensFromQuery(query);
+  const merged = collected.filter(r => !isGenericSearchResult(r) && matchesQuery(`${r.title} ${r.snippet || ''}`, tokens, 2));
+
+  const scored = merged.map(r => ({ r, s: scoreResource(r, query) }))
+                         .sort((a,b) => b.s - a.s)
+                         .map(({r}) => r);
+  // If we still have fewer than requested, append curated fallbacks to fill
+  if (scored.length < limit) {
+    const fb = sanitizeResources(curatedFallback(query));
+    for (const it of fb) {
+      if (!scored.find((x) => x.url === it.url)) scored.push(it);
+      if (scored.length >= limit) break;
+    }
+  }
+  return scored.slice(0, limit);
+}
+
+function curatedFallback(query) {
+  const q = query.trim();
+  const qEnc = encodeURIComponent(q);
+  const qDash = encodeURIComponent(q.replace(/\s+/g, '+'));
+  const tag = q.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)[0] || 'programming';
+  return [
+    { title: 'Wikipedia Search', url: `https://en.wikipedia.org/w/index.php?search=${qEnc}`, source: 'wikipedia.org', snippet: '' },
+    { title: 'GeeksforGeeks Search', url: `https://www.geeksforgeeks.org/?s=${qEnc}`, source: 'geeksforgeeks.org', snippet: '' },
+    { title: 'freeCodeCamp Guide Search', url: `https://www.freecodecamp.org/news/search/?query=${qEnc}`, source: 'freecodecamp.org', snippet: '' },
+    { title: 'Tutorialspoint Search', url: `https://www.tutorialspoint.com/search/${qDash}`, source: 'tutorialspoint.com', snippet: '' },
+    { title: 'Stack Overflow Search', url: `https://stackoverflow.com/search?q=${qEnc}`, source: 'stackoverflow.com', snippet: '' },
+    { title: 'Kaggle Search', url: `https://www.kaggle.com/search?q=${qEnc}`, source: 'kaggle.com', snippet: '' },
+    { title: 'scikit-learn Docs Search', url: `https://www.google.com/search?q=site%3Ascikit-learn.org+${qEnc}`, source: 'scikit-learn.org', snippet: '' },
+    { title: 'MDN Search', url: `https://developer.mozilla.org/en-US/search?q=${qEnc}`, source: 'developer.mozilla.org', snippet: '' },
+  ];
 }
 
 module.exports = { searchResources, sanitizeResources };

@@ -104,18 +104,72 @@ Return JSON with an array 'modules' where each module has 'title' and 'learningO
 };
 
 exports.summarizeText = async (text) => {
-  const prompt = `You are writing an attractive learning brief for a course module.
-Return a short, scannable Markdown section with:
-- A one-sentence hook.
-- 10-15 bullet points grouped under clear subheadings (e.g., Key Concepts, Hands‑on, Outcomes, Prereqs) using bold section labels.
-- Crisp, student-friendly phrasing. No fluff. Avoid repeating the module title. Do not include code fences.
+  const prompt = `You are an expert course writer. Write a comprehensive module explanation in the style of a high-quality Udemy lesson, with textbook-level depth.
+
+Requirements:
+- Write primarily in paragraphs (around 80–90% of the content).
+- You may include a single short bullet list only if it clarifies steps, pitfalls, or key takeaways.
+- Add relevant code snippets if it helps explain the topic.
+- Use clear, engaging, student-friendly language with smooth transitions.
+- Bold a few important keywords using **markdown**.
+- Target length: 700–1100 words (aim for depth and specificity, not fluff).
+- Do not include meta commentary, disclaimers, or refer to transcripts or prompts.
+- Separate paragraphs with a blank line.
+- If the source is incomplete, infer reasonable context and stitch a coherent narrative.
+
+Coverage checklist (weave these into cohesive prose, not headings):
+- Concise definition, motivation, and when to use it.
+- Mental model and core building blocks.
+- Step-by-step workflow or algorithm with rationale.
+- A non-trivial, end-to-end example; include a short annotated code snippet if applicable.
+- Common pitfalls and edge cases, with fixes.
+- Contrast with related concepts and when to prefer each.
+- Practical tips for production use (performance, reliability, maintainability).
 
 Source transcript/context (may be partial):\n\n${text || ''}`;
+
+  function sanitizeOut(s = '') {
+    return (s || '')
+      .replace(/no transcript[^\n]*\n?/gi, '')
+      .replace(/please provide[^\n]*\n?/gi, '')
+      .replace(/based on the following context[^\n]*\n?/gi, '')
+      .replace(/this module provides a clear, end-to-end narrative[^\n]*\n?/gi, '')
+      .replace(/by the end, you should be able to[^\n]*\n?/gi, '')
+      .trim();
+  }
+
+  function tooGeneric(s = '') {
+    const lc = (s || '').toLowerCase();
+    const wc = lc.split(/\s+/).filter(Boolean).length;
+    const boiler = [
+      'this module provides a clear, end-to-end narrative',
+      'we then transition into the workflow you will actually use',
+      'by the end, you should be able to explain the concept to others',
+    ];
+    const hasBoiler = boiler.some(p => lc.includes(p));
+    return wc < 350 || hasBoiler; // below our minimum or contains boilerplate
+  }
 
   try {
     const result = await model.generateContent(prompt);
     const response = await result.response;
-    return response.text();
+    let out = sanitizeOut(response.text() || '');
+
+    // If too short or generic, force a rewrite with stronger constraints
+    if (tooGeneric(out)) {
+      const forcePrompt = `Rewrite the following to be textbook-level (700–1100 words), highly specific to the topic and context, with an annotated example and concrete pitfalls.
+Do not use generic phrases like “This module provides a clear narrative” or “By the end, you should be able…”.
+Maintain paragraph-first style and keep only one short bullet list if necessary.
+
+Original draft:\n\n${out || '(empty)'}\n\nContext again for grounding:\n\n${text || ''}`;
+      try {
+        const second = await model.generateContent(forcePrompt);
+        const secondText = sanitizeOut(second.response?.text?.() || second.response?.text?.call(second.response) || '');
+        if (secondText && !tooGeneric(secondText)) return secondText;
+        if (secondText) out = secondText; // take better of the two
+      } catch {}
+    }
+    return out;
   } catch (error) {
     const status = error?.status || error?.code;
     const serverError = (typeof status === 'number' && status >= 500 && status < 600) || error?.statusText === 'Internal Server Error';
@@ -123,26 +177,10 @@ Source transcript/context (may be partial):\n\n${text || ''}`;
         status === 503 || error?.statusText === 'Service Unavailable' || serverError) {
       console.warn('Gemini 4xx/5xx in summarizeText: using heuristic summary.');
       const snippet = typeof text === 'string' ? text.slice(0, 600) : '';
-      return [
-        '**Why this matters:** Build a strong foundation with practical, modern examples.',
-        '',
-        '**Key concepts**',
-        '- Core terminology and mental models',
-        '- Real-world applications and trade-offs',
-        '- Common pitfalls to avoid',
-        '',
-        '**Hands-on**',
-        '- Step-by-step walkthroughs and mini-exercises',
-        '- Quick checks to verify understanding',
-        '',
-        '**You will be able to**',
-        '- Explain the idea clearly to others',
-        '- Apply it on a small project/task',
-        '- Identify what to learn next',
-        '',
-        `**Highlights**`,
-        `- ${snippet ? snippet.slice(0, 160) + (snippet.length > 160 ? '…' : '') : 'context not available'}`,
-      ].join('\n');
+      const para1 = `This module provides a clear, end‑to‑end narrative that introduces the core idea, situates it in real projects, and frames why it matters now. You will first connect the concept to familiar problems, then unpack the building blocks and mental models that make it practical. Along the way, we clarify terminology and dispel common misconceptions so you can think about the topic with precision.`;
+      const para2 = `We then transition into the workflow you will actually use: how to set things up, what decisions to make at each step, and how to evaluate trade‑offs. Short, concrete examples show how the pieces fit together, and we call out subtle details that typically trip learners up. Where relevant, we highlight performance, reliability, and maintainability considerations that distinguish a quick demo from production‑grade work.`;
+      const para3 = `By the end, you should be able to explain the concept to others, implement it confidently in a small project, and identify the next areas to deepen your skill. ${snippet ? `Key ideas emphasized here are grounded in the following source material: "${snippet.slice(0, 200)}${snippet.length > 200 ? '…' : ''}".` : ''}`;
+      return [para1, '', para2, '', para3].join('\n');
     }
     console.error('Error summarizing text with Gemini:', error);
     return 'Summary could not be generated at this time.';

@@ -1,5 +1,6 @@
 /* Import modern fonts */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 /* Base styles with enhanced typography */
 * {
@@ -27,3 +28,52 @@ body {
 .animate-reverse {
   animation: reverse-spin 1s linear infinite;
 }
+
+/* Prose-like defaults for AI-generated summary */
+.summary-prose { 
+  font-family: 'Lora', Georgia, 'Times New Roman', serif;
+  color: rgb(226 232 240); /* slate-200 */
+  text-wrap: pretty;
+  hyphens: auto;
+}
+.summary-prose p {
+  margin-top: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+.summary-prose p:first-child { margin-top: 0; }
+.summary-prose p:last-child { margin-bottom: 0; }
+.summary-prose strong {
+  color: rgb(216 180 254); /* purple-300 */
+  font-weight: 700;
+}
+.summary-prose a {
+  color: rgb(147 197 253); /* sky-300 */
+  text-decoration: underline;
+}
+.summary-prose code {
+  background: rgba(148, 163, 184, 0.15);
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+}
+.summary-prose h1,
+.summary-prose h2,
+.summary-prose h3,
+.summary-prose ul,
+.summary-prose ol {
+  margin-top: 1rem;
+  margin-bottom: 0.75rem;
+}
+.summary-prose ul,
+.summary-prose ol { padding-left: 1.25rem; }
+.summary-prose li { margin: 0.35rem 0; }
+.summary-prose ul { list-style: disc; }
+.summary-prose ol { list-style: decimal; }
+.summary-prose ul li::marker { color: rgb(167 139 250); /* violet-400 */ }
+.summary-prose ol li::marker { color: rgb(129 140 248); /* indigo-400 */ }
+
+/* Collapse top/bottom gaps inside summary */
+.summary-prose > *:first-child { margin-top: 0 !important; }
+.summary-prose > *:last-child { margin-bottom: 0 !important; }
+.summary-prose p:empty { display: none; }
+/* Remove paragraphs that are just a <br> */
+.summary-prose p br:only-child { display: none; }
