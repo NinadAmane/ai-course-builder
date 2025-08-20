@@ -56,7 +56,6 @@ export default function HomePage() {
   const [error, setError] = useState('');
   const [controller, setController] = useState(null);
   const [refresh, setRefresh] = useState(false);
-  const exportRef = useRef(null);
 
   // New: semantic and filter controls
   const [semantic, setSemantic] = useState(true);
@@ -176,68 +175,6 @@ export default function HomePage() {
   const useRecent = (t) => {
     setTopic(t);
     setShowHistory(false);
-  };
-
-  // Lazy-load html2pdf.js from CDN (single-flight)
-  const ensureHtml2Pdf = () => {
-    return new Promise((resolve, reject) => {
-      if (window.html2pdf) return resolve(window.html2pdf);
-      const existing = document.querySelector('script[data-html2pdf]');
-      if (existing) {
-        existing.addEventListener('load', () => resolve(window.html2pdf));
-        existing.addEventListener('error', reject);
-        return;
-      }
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js';
-      script.async = true;
-      script.defer = true;
-      script.setAttribute('data-html2pdf', '1');
-      script.onload = () => resolve(window.html2pdf);
-      script.onerror = () => reject(new Error('Failed to load html2pdf'));
-      document.body.appendChild(script);
-    });
-  };
-
-  const handleExportPdf = async () => {
-    if (!course || !exportRef.current) return;
-    try {
-      const html2pdf = await ensureHtml2Pdf();
-      const root = exportRef.current;
-      const safeTitle = (course.title || 'course')
-        .replace(/[^a-z0-9\-\s_]/gi, '')
-        .replace(/\s+/g, '-')
-        .toLowerCase();
-
-      // Enter PDF mode: stop animations/transitions and hide elements marked no-print
-      document.body.classList.add('pdf-mode');
-
-      const opt = {
-        margin: [12, 16, 16, 16],
-        filename: `${safeTitle}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          logging: false,
-          ignoreElements: (el) => {
-            try {
-              const cls = el?.classList;
-              return cls?.contains('no-print') || el.tagName === 'VIDEO' || el.tagName === 'IFRAME' || el.tagName === 'IMG';
-            } catch { return false; }
-          },
-          windowWidth: document.documentElement.clientWidth,
-        },
-        jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' },
-        pagebreak: { mode: ['css', 'legacy'] },
-      };
-      await html2pdf().set(opt).from(root).save();
-    } catch (e) {
-      console.error('Export PDF failed', e);
-      setError('Export to PDF failed. Please try again.');
-    } finally {
-      document.body.classList.remove('pdf-mode');
-    }
   };
 
   return (
@@ -405,23 +342,12 @@ export default function HomePage() {
                 {isLoading && <Loader />}
 
                 {course && (
-                  <div className="space-y-8" ref={exportRef}>
+                  <div className="space-y-8">
                     <div className="p-4 rounded-xl bg-white/5 border border-white/10 flex items-center justify-between">
                       <div className="flex items-center gap-2 font-semibold text-purple-300">
                         <Sparkles size={18} /> Generated Course
                       </div>
                       <h2 className="mt-1 text-2xl font-bold text-slate-100">{course.title}</h2>
-                      <div className="ml-auto">
-                        <button
-                          type="button"
-                          onClick={handleExportPdf}
-                          className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/10 hover:bg-white/20 text-slate-100 text-sm"
-                          title="Export this course as PDF"
-                          aria-label="Export course as PDF"
-                        >
-                          Export PDF
-                        </button>
-                      </div>
                     </div>
 
                     <div className="space-y-6">

@@ -5,7 +5,6 @@ Generate a clean, readable learning path for any topic using AI. One prompt → 
 ## 🔥 Highlights
 - **Beautiful summaries** with professional typography on a dark, modern UI
 - **Code snippets** with a header and one‑click **Copy**
-- **Export to PDF** (client‑side, no install)
 - **Smart discovery**: semantic ranking + simple filters (views, duration, date)
 - **Fast & safe**: CORS‑restricted API, input validation, rate‑limited, Helmet
 - **Mongo‑backed** with a unique index on `Course.title`
