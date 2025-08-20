@@ -31,10 +31,6 @@
 
 
 
-MONGOOSE PASSWORD: hN1emGiyZtX8ihAc
-
-https://cloud.mongodb.com/v2/6890c7c9a095653c3b885ae2#/overview?automateSecurity=true
-
 
 
 
